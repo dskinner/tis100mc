@@ -1,7 +1,6 @@
 package tis100mc
 
 import (
-	"errors"
 	"fmt"
 	"log"
 )
@@ -32,30 +31,143 @@ func clamp(x Int10) Int10 {
 }
 
 type Node interface {
-	Connect(Port, Node) error
-
 	Read(Port) Int10
 	Write(Port, Int10)
-
-	Port(Port) chan Int10
-	// TODO objectional as can break system
-	SetPort(Port, chan Int10)
-
 	Step()
 }
 
-type BasicNode struct {
-	up, down, left, right chan Int10
+type CN struct {
+	left, right, up, down chan Int10
 
-	blocked bool
+	// stage writes
+	any chan Int10
+	// tracks ANY
+	last chan Int10
+}
+
+func (cn CN) Port(port Port) chan Int10 {
+	switch port {
+	case LEFT:
+		return cn.left
+	case RIGHT:
+		return cn.right
+	case UP:
+		return cn.up
+	case DOWN:
+		return cn.down
+	case LAST:
+		return cn.last
+	default:
+		panic(fmt.Sprintf("Port %s is not addressable.", port))
+	}
+}
+
+// Read returns value from port and will block if there is nothing to read.
+//
+// TODO There's a fundamental problem with how Nodes currently read in that they
+// do not request their neighbors but self-refer, making the defined behavior
+// of write on ANY problematic.
+func (cn CN) Read(port Port) Int10 {
+	switch port {
+	case LEFT:
+		return <-cn.left
+	case RIGHT:
+		return <-cn.right
+	case UP:
+		return <-cn.up
+	case DOWN:
+		return <-cn.down
+	case ANY:
+		select {
+		case x := <-cn.left:
+			(&cn).last = cn.left
+			return x
+		case x := <-cn.right:
+			(&cn).last = cn.right
+			return x
+		case x := <-cn.up:
+			(&cn).last = cn.up
+			return x
+		case x := <-cn.down:
+			(&cn).last = cn.down
+			return x
+		}
+	case LAST:
+		if cn.last == nil {
+			// TODO return error instead
+			panic("Attempt to read LAST before ANY.")
+		}
+		return <-cn.last
+	case NIL:
+		return 0
+	}
+	panic(fmt.Sprintf("Read from unknown port %s", port))
+}
+
+// Write writes value to port and will block if port is pending read.
+func (cn CN) Write(port Port, x Int10) {
+	switch port {
+	case LEFT:
+		cn.left <- x
+	case RIGHT:
+		cn.right <- x
+	case UP:
+		cn.up <- x
+	case DOWN:
+		cn.down <- x
+	case ANY:
+		// TODO the docs state when ANY is dest, result will be sent to first
+		// node that attempts to read on any port. Behavior is unspecified when
+		// multiple nodes are pending reads on src node.
+		//
+		// Perhaps a RequestRead is necessary to track this behavior for tis-100.
+		panic("TODO implement")
+	case LAST:
+		if cn.last == nil {
+			// TODO return error instead
+			panic("Attempt to write LAST before ANY.")
+		}
+		cn.last <- x
+	}
+}
+
+// TODO Join assigns the node's port to the argument node's opposite
+// port. If neither node has a port created to share, one is created.
+func Join(cn0 CN, port Port, cn1 CN) (CN, CN) {
+	ch := make(chan Int10, 1)
+	switch port {
+	case LEFT:
+		cn0.left = ch
+		cn1.right = cn0.left
+	case RIGHT:
+		cn0.right = ch
+		cn1.left = cn0.right
+	case UP:
+		cn0.up = ch
+		cn1.down = cn0.up
+	case DOWN:
+		cn0.down = ch
+		cn1.up = cn0.down
+	default:
+		panic(fmt.Sprintf("Join on %s not supported.", port))
+	}
+	return cn0, cn1
+}
+
+// type PX struct {
+// up0, down0, left0, right0 chan Int10
+// up1, down1, left1, right1 chan Int10
+// }
+
+type BasicNode struct {
+	ports CN
 
 	// TODO make this optional as part of tis-100 emulation
 	step chan struct{}
-
 	// stores last port read or written to when using ANY
-	last Port
-
-	debug bool
+	last    Port
+	blocked bool
+	debug   bool
 }
 
 func (n *BasicNode) logf(format string, v ...interface{}) {
@@ -68,126 +180,24 @@ func (n *BasicNode) Blocked() bool { return n.blocked }
 
 func (n *BasicNode) Step() {}
 
-// Connect assigns the node's port to the argument node's opposite
-// port. If neither node has a port created to share, one is created.
-func (n *BasicNode) Connect(port Port, cn Node) error { // TODO accept Node interface arg
-	switch port {
-	case UP:
-		return cn.Connect(DOWN, n)
-	case DOWN:
-		if n.down != nil || cn.Port(UP) != nil {
-			return errors.New("Attempting to connect up/down but chan already exists.")
-		}
-		n.down = make(chan Int10, 1)
-		cn.SetPort(UP, n.down)
-	case LEFT:
-		return cn.Connect(RIGHT, n)
-	case RIGHT:
-		if n.right != nil || cn.Port(LEFT) != nil {
-			return errors.New("Attempting to connect left/right but chan already exists.")
-		}
-		n.right = make(chan Int10, 1)
-		cn.SetPort(LEFT, n.right)
-	default:
-		return errors.New(fmt.Sprintf("Unknown port: %s", port))
-	}
-	return nil
-}
-
 func (n *BasicNode) Port(port Port) chan Int10 {
 	switch port {
-	case UP:
-		return n.up
-	case DOWN:
-		return n.down
-	case LEFT:
-		return n.left
-	case RIGHT:
-		return n.right
-	case ACC:
-		panic("ACC not supported")
 	case NIL:
 		// TODO implement to spec
 		return make(chan Int10, 1)
-	default:
+	case Port(0): // TODO meh
 		var ch chan Int10
 		return ch
-	}
-}
-
-func (n *BasicNode) SetPort(port Port, ch chan Int10) {
-	switch port {
-	case UP:
-		n.up = ch
-	case DOWN:
-		n.down = ch
-	case LEFT:
-		n.left = ch
-	case RIGHT:
-		n.right = ch
 	default:
-		panic(fmt.Sprintf("SetPort does not support %s", port))
+		return n.ports.Port(port)
 	}
 }
 
-// Read returns value from port and will block if there is nothing to read.
 func (n *BasicNode) Read(port Port) Int10 {
-	switch port {
-	case UP:
-		return <-n.up
-	case DOWN:
-		return <-n.down
-	case LEFT:
-		return <-n.left
-	case RIGHT:
-		return <-n.right
-	case ANY:
-		select {
-		case x := <-n.up:
-			n.last = UP
-			return x
-		case x := <-n.down:
-			n.last = DOWN
-			return x
-		case x := <-n.left:
-			n.last = LEFT
-			return x
-		case x := <-n.right:
-			n.last = RIGHT
-			return x
-		}
-	case NIL:
-		// panic("TODO implement")
-		// TODO check spec
-		return 0
-		// TODO handle in ExecNode
-		// case ACC:
-		// return n.acc
-	}
-	panic(fmt.Sprintf("Read from unknown port %s", port))
+	return n.ports.Read(port)
 }
 
 // Write writes value to port and will block if port is pending read.
-func (n *BasicNode) Write(port Port, val Int10) {
-	switch port {
-	case UP:
-		n.up <- val
-	case DOWN:
-		n.down <- val
-	case LEFT:
-		n.left <- val
-	case RIGHT:
-		n.right <- val
-	case ANY:
-		// TODO the docs state when ANY is dest, result will be sent to first
-		// node that attempts to read on any port. Behavior is unspecified when
-		// multiple nodes are pending reads on src node.
-		//
-		// Perhaps a RequestRead is necessary to track this behavior for tis-100.
-		panic("TODO implement")
-	case ACC:
-		// n.acc = val
-		// TODO handle in ExecNode
-		panic("ACC not supported")
-	}
+func (n *BasicNode) Write(port Port, x Int10) {
+	n.ports.Write(port, x)
 }

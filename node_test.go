@@ -10,10 +10,12 @@ import (
 func newNode() *ExecNode {
 	return &ExecNode{
 		BasicNode: &BasicNode{
-			up:    make(chan Int10, 1),
-			down:  make(chan Int10, 1),
-			left:  make(chan Int10, 1),
-			right: make(chan Int10, 1),
+			ports: CN{
+				up:    make(chan Int10, 1),
+				down:  make(chan Int10, 1),
+				left:  make(chan Int10, 1),
+				right: make(chan Int10, 1),
+			},
 		},
 	}
 }
@@ -36,33 +38,26 @@ func TestIsPort(t *testing.T) {
 	}
 }
 
-func TestConnect(t *testing.T) {
-	n0 := &BasicNode{}
-	n1 := &BasicNode{}
+func TestJoin(t *testing.T) {
+	var n0, n1 CN
 
 	ps := []struct {
 		A, B Port
 	}{
-		{UP, DOWN},
-		{DOWN, UP},
 		{LEFT, RIGHT},
 		{RIGHT, LEFT},
+		{UP, DOWN},
+		{DOWN, UP},
 	}
 
 	for _, p := range ps {
-		if err := n0.Connect(p.A, n1); err != nil {
-			t.Fatal(err)
+		n0, n1 = Join(n0, p.A, n1)
+		if n0.Port(p.A) == nil || n1.Port(p.B) == nil {
+			t.Fatalf("nil ports on Join:\n%+v\n%+v\n", n0, n1)
 		}
-		if n0.Port(p.A) == nil || n1.Port(p.B) == nil || n0.Port(p.A) != n1.Port(p.B) {
-			t.Fatalf("Node connect failure.\nn0: %+v\nn1: %+v", n0, n1)
+		if n0.Port(p.A) <- 1; <-n1.Port(p.B) != 1 {
+			t.Fatal()
 		}
-		if err := n1.Connect(p.B, n0); err == nil {
-			t.Fatal("Node connect should return error, already connected.")
-		}
-	}
-
-	if err := n0.Connect(Port(0), n1); err == nil {
-		t.Fatal("Node connect should return error, unknown port.")
 	}
 }
 
@@ -74,10 +69,13 @@ func TestReadWrite(t *testing.T) {
 		P Port
 		X Int10
 	}{
-		{n.up, UP, 0},
-		{n.down, DOWN, 1},
-		{n.left, LEFT, 2},
-		{n.right, RIGHT, 3},
+		{n.ports.left, LEFT, 2},
+		{n.ports.right, RIGHT, 3},
+		{n.ports.up, UP, 0},
+		{n.ports.down, DOWN, 1},
+		// TODO
+		// {n.ports.right, ANY, 4},
+		// {n.ports.right, LAST, 5},
 	}
 
 	for _, m := range ms {
@@ -155,28 +153,28 @@ func TestMOV(t *testing.T) {
 
 	n.logf("exec op 1")
 	n.Step()
-	if x, err := read(n.right); x != 1 || err != nil {
+	if x, err := read(n.ports.right); x != 1 || err != nil {
 		t.Fatalf("Failed: %s - %+v", n.ops[1], n)
 	} else {
-		n.right <- x
+		n.ports.right <- x
 	}
 
 	n.logf("exec op 2")
 	n.Step()
-	if x, err := read(n.left); x != 1 || err != nil {
+	if x, err := read(n.ports.left); x != 1 || err != nil {
 		t.Fatalf("Failed: %s - %+v", n.ops[2], n)
 	} else {
-		n.left <- x
+		n.ports.left <- x
 	}
 	n.Step()
-	if x, err := read(n.left); x != 1 || err != nil {
+	if x, err := read(n.ports.left); x != 1 || err != nil {
 		t.Fatalf("Failed: %s - %+v", n.ops[3], n)
 	} else {
-		n.left <- x
+		n.ports.left <- x
 	}
 
 	n.Step()
-	if err := write(n.left, 1); err != nil || n.dw.P != 0 {
+	if err := write(n.ports.left, 1); err != nil || n.dw.P != 0 {
 		t.Fatalf("Failed (pending write): %s - %+v", n.ops[4], n)
 	}
 }

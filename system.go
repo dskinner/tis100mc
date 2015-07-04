@@ -4,6 +4,7 @@ import "sync"
 
 // TODO setup simple way to connect multiple systems to connect
 // boundary nodes.
+//
 type System struct {
 	nodes [12]*ExecNode
 	stop  chan struct{}
@@ -52,7 +53,11 @@ func NewSystem() *System {
 	}
 
 	for _, cn := range defaultConnections {
-		sys.nodes[cn.A].Connect(cn.P, sys.nodes[cn.B].BasicNode) // TODO yuck .Node
+		a := sys.nodes[cn.A]
+		b := sys.nodes[cn.B]
+		a.ports, b.ports = Join(a.ports, cn.P, b.ports)
+		sys.nodes[cn.A] = a
+		sys.nodes[cn.B] = b
 	}
 
 	for _, n := range sys.nodes {
