@@ -20,7 +20,7 @@ SWP
 JMP L`
 
 var n0two = `#
-MOV 1, NIL
+# MOV 1, NIL
 L: ADD 1
 MOV ACC, RIGHT
 SAV
@@ -42,7 +42,7 @@ func main() {
 	prompt := true
 
 LOOP:
-	for i := 0; i < 90; i++ {
+	for {
 		if prompt {
 			fmt.Printf("> ")
 			r := bufio.NewReader(os.Stdin)
@@ -55,6 +55,11 @@ LOOP:
 				break LOOP
 			case "r\n":
 				prompt = false
+			case "p\n":
+				fmt.Println("Node 0 ACC/BAK:", sys.Node(0).ACC(), sys.Node(0).BAK())
+				fmt.Println("Node 1 ACC/BAK:", sys.Node(1).ACC(), sys.Node(1).BAK())
+				fmt.Println("---")
+				continue LOOP
 			}
 		}
 

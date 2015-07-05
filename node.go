@@ -101,7 +101,7 @@ func (cn CN) Read(port Port) Int10 {
 	case NIL:
 		return 0
 	}
-	panic(fmt.Sprintf("Read from unknown port %s", port))
+	panic(fmt.Sprintf("Read from %s not supported.", port))
 }
 
 // Write writes value to port and will block if port is pending read.
@@ -128,6 +128,10 @@ func (cn CN) Write(port Port, x Int10) {
 			panic("Attempt to write LAST before ANY.")
 		}
 		cn.last <- x
+	case NIL:
+		// TODO check spec
+	default:
+		panic(fmt.Sprintf("Write to %s not supported.", port))
 	}
 }
 
@@ -161,9 +165,11 @@ func Join(cn0 CN, port Port, cn1 CN) (CN, CN) {
 
 type BasicNode struct {
 	ports CN
+	cy    *Cycler
 
 	// TODO make this optional as part of tis-100 emulation
-	step chan struct{}
+	// step chan struct{}
+
 	// stores last port read or written to when using ANY
 	last    Port
 	blocked bool
@@ -194,10 +200,12 @@ func (n *BasicNode) Port(port Port) chan Int10 {
 }
 
 func (n *BasicNode) Read(port Port) Int10 {
+	// n.cy.Cycle()
 	return n.ports.Read(port)
 }
 
 // Write writes value to port and will block if port is pending read.
 func (n *BasicNode) Write(port Port, x Int10) {
+	// n.cy.Cycle()
 	n.ports.Write(port, x)
 }

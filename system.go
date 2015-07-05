@@ -49,7 +49,7 @@ func NewSystem() *System {
 	}
 
 	for i := range sys.nodes {
-		sys.nodes[i] = &ExecNode{BasicNode: &BasicNode{step: make(chan struct{})}}
+		sys.nodes[i] = &ExecNode{BasicNode: &BasicNode{cy: NewCycler(true)}}
 	}
 
 	for _, cn := range defaultConnections {
@@ -103,9 +103,14 @@ func (sys *System) Stop() {
 func (sys *System) Step() {
 	// TODO check integrity every step? depends on use
 
-	sys.wg.Add(len(sys.nodes))
+	// sys.wg.Add(len(sys.nodes))
 	for _, n := range sys.nodes {
-		n.step <- struct{}{}
+		n.cy.Add(1)
+		n.cy.Wait()
+		// select {
+		// case n.cy.step <- struct{}{}:
+		// default:
+		// }
 	}
-	sys.wg.Wait()
+	// sys.wg.Wait()
 }

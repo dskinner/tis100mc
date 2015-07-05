@@ -10,6 +10,7 @@ import (
 func newNode() *ExecNode {
 	return &ExecNode{
 		BasicNode: &BasicNode{
+			cy: NewCycler(false),
 			ports: CN{
 				up:    make(chan Int10, 1),
 				down:  make(chan Int10, 1),
@@ -18,6 +19,12 @@ func newNode() *ExecNode {
 			},
 		},
 	}
+}
+
+func cycle(n *ExecNode) {
+	n.cy.Add(1)
+	n.Step()
+	n.cy.WaitIO()
 }
 
 func TestIsPort(t *testing.T) {
@@ -92,6 +99,15 @@ func TestReadWrite(t *testing.T) {
 	}
 }
 
+func TestEmptyNode(t *testing.T) {
+	n := newNode()
+	n.debug = true
+
+	n.cy.Add(1)
+	n.Step()
+	n.cy.Wait()
+}
+
 func read(ch chan Int10) (Int10, error) {
 	select {
 	case <-time.After(100 * time.Millisecond):
@@ -113,7 +129,6 @@ func write(ch chan Int10, x Int10) error {
 func TestMOV(t *testing.T) {
 	n := newNode()
 	n.debug = true
-
 	n.ops = []*Operation{
 		NewOperation(MOV, 1, ACC),
 		// NewOperation(MOV, Int10(ACC), ACC),
@@ -142,7 +157,7 @@ func TestMOV(t *testing.T) {
 	// }
 
 	n.logf("exec op 0")
-	n.Step()
+	cycle(n)
 	if n.acc != 1 {
 		t.Fatalf("Failed: %s - %+v", n.ops[0], n)
 	}
@@ -152,7 +167,7 @@ func TestMOV(t *testing.T) {
 	// }
 
 	n.logf("exec op 1")
-	n.Step()
+	cycle(n)
 	if x, err := read(n.ports.right); x != 1 || err != nil {
 		t.Fatalf("Failed: %s - %+v", n.ops[1], n)
 	} else {
@@ -160,21 +175,21 @@ func TestMOV(t *testing.T) {
 	}
 
 	n.logf("exec op 2")
-	n.Step()
+	cycle(n)
 	if x, err := read(n.ports.left); x != 1 || err != nil {
 		t.Fatalf("Failed: %s - %+v", n.ops[2], n)
 	} else {
 		n.ports.left <- x
 	}
-	n.Step()
+	cycle(n)
 	if x, err := read(n.ports.left); x != 1 || err != nil {
 		t.Fatalf("Failed: %s - %+v", n.ops[3], n)
 	} else {
 		n.ports.left <- x
 	}
 
-	n.Step()
-	if err := write(n.ports.left, 1); err != nil || n.dw.P != 0 {
+	cycle(n)
+	if err := write(n.ports.left, 1); err != nil { // || n.dw.P != 0 {
 		t.Fatalf("Failed (pending write): %s - %+v", n.ops[4], n)
 	}
 }
@@ -185,11 +200,13 @@ func TestSWP(t *testing.T) {
 		{SWP, nil, nil},
 	}
 	n.acc = 1
-	n.Step()
+
+	cycle(n)
 	if n.acc != 0 || n.bak != 1 {
 		t.Fatal("Failed: SWP")
 	}
-	n.Step()
+
+	cycle(n)
 	if n.acc != 1 || n.bak != 0 {
 		t.Fatal("Failed: SWP")
 	}
@@ -201,7 +218,7 @@ func TestSAV(t *testing.T) {
 		{SAV, nil, nil},
 	}
 	n.acc = 1
-	n.Step()
+	cycle(n)
 	if n.acc != 1 || n.bak != 1 {
 		t.Fatal("Failed: SAV")
 	}
@@ -213,11 +230,11 @@ func TestADD(t *testing.T) {
 		NewOperation(ADD, 5, 0),
 		NewOperation(ADD, -7, 0),
 	}
-	n.Step()
+	cycle(n)
 	if n.acc != 5 {
-		t.Fatal()
+		t.Fatalf("%+v\n%+v\n%+v\n", n, n.BasicNode, n.cy)
 	}
-	n.Step()
+	cycle(n)
 	if n.acc != -2 {
 		t.Fatal()
 	}
@@ -229,11 +246,11 @@ func TestSUB(t *testing.T) {
 		NewOperation(SUB, 5, 0),
 		NewOperation(SUB, -7, 0),
 	}
-	n.Step()
+	cycle(n)
 	if n.acc != -5 {
 		t.Fatal()
 	}
-	n.Step()
+	cycle(n)
 	if n.acc != 2 {
 		t.Fatal()
 	}
@@ -245,11 +262,11 @@ func TestNEG(t *testing.T) {
 		{NEG, nil, nil},
 	}
 	n.acc = 5
-	n.Step()
+	cycle(n)
 	if n.acc != -5 {
 		t.Fatal()
 	}
-	n.Step()
+	cycle(n)
 	if n.acc != 5 {
 		t.Fatal()
 	}
